@@ -88,13 +88,13 @@ df_pt["OR"] = (
 
 df_pt_clean = (
     df_pt[
-        ["OR", "Salarié - Nom", "Salarié - Équipe(Nom)"]
+        ["OR", "Salarié - Nom", "Salarié - Equipe(Nom)"]
     ]
     .dropna(subset=["OR"])
     .drop_duplicates(subset=["OR"])
     .rename(columns={
         "Salarié - Nom": "Technicien",
-        "Salarié - Équipe(Nom)": "Equipe"
+        "Salarié - Equipe(Nom)": "Equipe"
     })
 )
 
