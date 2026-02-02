@@ -87,7 +87,7 @@ df_pt_simple = (
         [
             "OR",
             "Salarié - Nom",
-            "Salarié - Équipe(Nom)"
+            "Salarié - Equipe(Nom)"
         ]
     ]
     .dropna(subset=["OR"])
