@@ -99,7 +99,7 @@ df_pt_best = (
     .drop_duplicates(subset=["OR"])
     .rename(columns={
         "Salarié - Nom": "Technicien",
-        "Salarié - Équipe(Nom)": "Equipe"
+        "Salarié - Equipe(Nom)": "Equipe"
     })
 )
 
