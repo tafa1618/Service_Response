@@ -156,6 +156,24 @@ if constructeurs_selectionnes:
     df = df[df["Constructeur"].isin(constructeurs_selectionnes)]
 
 # ============================================================
+# Filte sur La position
+st.sidebar.header("🎛️ Périmètre métier")
+
+positions_disponibles = sorted(
+    df_ie["Position"].dropna().unique().tolist()
+)
+
+positions_selectionnees = st.sidebar.multiselect(
+    "Position OR",
+    options=positions_disponibles,
+    default=positions_disponibles
+)
+
+df_ie = df_ie[
+    df_ie["Position"].isin(positions_selectionnees)
+].copy()
+
+#=============================================================
 # KPI
 # ============================================================
 total_or = df["OR"].nunique()
