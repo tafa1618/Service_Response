@@ -10,8 +10,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🔍 Validation KPI Service Response ")
-st.caption("Objectif : vérifier la logique métier et les chiffres réels")
+st.title("🔍 Validation KPI Service Response")
+st.caption("Objectif : vérifier la logique métier et fiabiliser les KPI")
 
 # ============================================================
 # SIDEBAR – UPLOAD
@@ -19,7 +19,7 @@ st.caption("Objectif : vérifier la logique métier et les chiffres réels")
 st.sidebar.header("📂 Chargement des données")
 
 file_ie = st.sidebar.file_uploader(
-    "Extraction IE (déjà traitée – avec Planifié ?)",
+    "Extraction IE",
     type=["xlsx"]
 )
 
@@ -28,8 +28,13 @@ file_pointage = st.sidebar.file_uploader(
     type=["xlsx"]
 )
 
-if not (file_ie and file_pointage):
-    st.info("👉 Charge l’Extraction IE traitée et le Pointage pour commencer")
+file_base_bo = st.sidebar.file_uploader(
+    "Base_BO",
+    type=["xlsx"]
+)
+
+if not (file_ie and file_pointage and file_base_bo):
+    st.info("👉 Charge les 3 fichiers pour démarrer")
     st.stop()
 
 # ============================================================
@@ -37,103 +42,136 @@ if not (file_ie and file_pointage):
 # ============================================================
 df_ie = pd.read_excel(file_ie)
 df_pt = pd.read_excel(file_pointage)
+df_bo = pd.read_excel(file_base_bo)
 
 # ============================================================
 # NORMALISATION – EXTRACTION IE
 # ============================================================
 df_ie["OR"] = df_ie["OR"].astype(str).str.strip()
-df_ie["Planifié ?"] = df_ie["Planifié ?"].astype(str).str.strip()
-df_ie["Localisation"] = df_ie["Localisation"].astype(str).str.upper().str.strip()
-df_ie["Position"] = df_ie["Position"].astype(str).str.upper().str.strip()
 
-# ============================================================
-# FILTRE OR FIELD (RÈGLE MÉTIER)
-# OR Field = MO EXTERIEUR / MO CVA
-# ============================================================
-localisations_field = ["MO EXTERIEUR", "MO CVA"]
-
-df_ie_field = df_ie[
-    df_ie["Localisation"].isin(localisations_field)
-].copy()
-
-# ============================================================
-# SIDEBAR – POINT DE CONTRÔLE POSITION
-# ============================================================
-st.sidebar.header("🎛️ Points de contrôle métier")
-
-positions_disponibles = sorted(
-    df_ie_field["Position"].dropna().unique().tolist()
+df_ie["Planifié ?"] = (
+    df_ie["Planifié ?"]
+    .astype(str)
+    .str.replace("\u00A0", " ", regex=False)
+    .str.strip()
+    .str.upper()
 )
 
-positions_selectionnees = st.sidebar.multiselect(
-    "Positions OR à inclure dans les KPI",
-    options=positions_disponibles,
-    default=positions_disponibles
+df_ie["Est_Planifie"] = df_ie["Planifié ?"].str.contains("PLANIF")
+
+df_ie["Localisation"] = (
+    df_ie["Localisation"]
+    .astype(str)
+    .str.upper()
+    .str.strip()
 )
 
-df_ie_field = df_ie_field[
-    df_ie_field["Position"].isin(positions_selectionnees)
-].copy()
+df_ie["Position"] = (
+    df_ie["Position"]
+    .astype(str)
+    .str.upper()
+    .str.strip()
+)
 
 # ============================================================
+
+
 # ============================================================
 # NORMALISATION – POINTAGE
+# Règle : 1 OR = 1 technicien (premier trouvé)
 # ============================================================
-df_pt["OR"] = df_pt["OR (Numéro)"].astype(str).str.strip()
-
-# On garde uniquement les colonnes utiles
-df_pt_simple = (
-    df_pt[
-        [
-            "OR",
-            "Salarié - Nom",
-            "Salarié - Equipe(Nom)"
-        ]
-    ]
-    .dropna(subset=["OR"])
+df_pt["OR"] = (
+    df_pt["OR (Numéro)"]
+    .astype(str)
+    .str.strip()
 )
 
-# 1 OR = 1 technicien (premier trouvé)
-df_pt_best = (
-    df_pt_simple
+df_pt_clean = (
+    df_pt[
+        ["OR", "Salarié - Nom", "Salarié - Équipe(Nom)"]
+    ]
+    .dropna(subset=["OR"])
     .drop_duplicates(subset=["OR"])
     .rename(columns={
         "Salarié - Nom": "Technicien",
-        "Salarié - Equipe(Nom)": "Equipe"
+        "Salarié - Équipe(Nom)": "Equipe"
     })
 )
-
 
 # ============================================================
 # MERGE IE + POINTAGE
 # ============================================================
-df = df_ie_field.merge(
-    df_pt_best[["OR", "Technicien", "Equipe"]],
+df = df_ie.merge(
+    df_pt_clean,
     on="OR",
     how="left"
 )
 
 # ============================================================
+# NORMALISATION – BASE BO
+# ============================================================
+df_bo["OR"] = (
+    df_bo["N° OR (Segment)"]
+    .astype(str)
+    .str.strip()
+)
+
+df_bo["Constructeur"] = (
+    df_bo["Constructeur de l'équipement"]
+    .astype(str)
+    .str.upper()
+    .str.strip()
+)
+
+df_bo_clean = df_bo[["OR", "Constructeur"]].dropna(subset=["OR"])
+
+# ============================================================
+# MERGE CONSTRUCTEUR
+# ============================================================
+df = df.merge(
+    df_bo_clean,
+    on="OR",
+    how="left"
+)
+
+# ============================================================
+# FILTRE CONSTRUCTEUR
+# ============================================================
+st.sidebar.header("🏗️ Équipement")
+
+constructeurs_disponibles = sorted(
+    df["Constructeur"]
+    .dropna()
+    .unique()
+    .tolist()
+)
+
+constructeurs_selectionnes = st.sidebar.multiselect(
+    "Constructeur de l’équipement",
+    options=constructeurs_disponibles,
+    default=constructeurs_disponibles
+)
+
+if constructeurs_selectionnes:
+    df = df[df["Constructeur"].isin(constructeurs_selectionnes)]
+
+# ============================================================
 # KPI
 # ============================================================
 total_or = df["OR"].nunique()
-or_planifie = df[df["Planifié ?"] == "Planifié"]["OR"].nunique()
-or_non_planifie = total_or - or_planifie
+or_planifies = df[df["Est_Planifie"]]["OR"].nunique()
+or_non_planifies = total_or - or_planifies
 taux_planif = round(
-    (or_planifie / total_or) * 100, 2
+    (or_planifies / total_or) * 100, 2
 ) if total_or > 0 else 0
 
-# ============================================================
-# AFFICHAGE KPI
-# ============================================================
 c1, c2, c3 = st.columns(3)
-
-c1.metric("Total OR non planifiés", or_non_planifie)
-c2.metric("Total OR planifiés", or_planifie)
+c1.metric("Total OR non planifiés", or_non_planifies)
+c2.metric("Total OR planifiés", or_planifies)
 c3.metric("Taux de planification", f"{taux_planif} %")
 
 # ============================================================
-# GRAPHIQUE – OR PAR ÉQUIPE & PLANIFICATION
+# GRAPHIQUE – PAR ÉQUIPE
 # ============================================================
 df_graph = (
     df.groupby(["Equipe", "Planifié ?"])["OR"]
@@ -147,8 +185,8 @@ fig = px.bar(
     y="OR",
     color="Planifié ?",
     barmode="stack",
-    text_auto=True,
-    title="OR Field – Planifiés vs Non planifiés par équipe"
+    title="OR Field – Planifiés vs Non planifiés par équipe",
+    text_auto=True
 )
 
 st.plotly_chart(fig, use_container_width=True)
@@ -166,19 +204,21 @@ st.dataframe(
             "Type intervention",
             "Localisation",
             "Position",
+            "Constructeur",
             "Technicien",
             "Equipe",
             "Planifié ?"
         ]
-    ]
-    .sort_values("OR"),
+    ].sort_values("OR"),
     use_container_width=True
 )
 
 # ============================================================
-# FOOTER – INTERPRÉTATION
+# MESSAGE CONTEXTE MÉTIER
 # ============================================================
-st.caption(
-    "ℹ️ Cette application sert de référence métier pour valider "
-    "les KPI avant implémentation Power BI."
-)
+if positions_selectionnees == ["EC"]:
+    st.warning(
+        "⚠️ Le filtre Position = EC (En cours) "
+        "contient majoritairement des OR non planifiés. "
+        "Le taux affiché n’est pas représentatif du KPI final."
+    )
