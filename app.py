@@ -57,7 +57,7 @@ df_ie["Planifié ?"] = (
     .str.upper()
 )
 
-df_ie["Est_Planifie"] = df_ie["Planifié ?"].str.contains("PLANIF")
+df_ie["Est_Planifie"] = df_ie["Planifié ?"].str.startswith("PLANIFI")
 
 df_ie["Localisation"] = (
     df_ie["Localisation"]
