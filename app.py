@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 
 # ============================================================
-# CONFIG
+# CONFIG APP
 # ============================================================
 st.set_page_config(
     page_title="Service Response – Validation KPI",
@@ -19,7 +19,7 @@ st.caption("Objectif : vérifier la logique métier et fiabiliser les KPI")
 st.sidebar.header("📂 Chargement des données")
 
 file_ie = st.sidebar.file_uploader(
-    "Extraction IE",
+    "Extraction IE (déjà filtrée OR Field)",
     type=["xlsx"]
 )
 
@@ -29,7 +29,7 @@ file_pointage = st.sidebar.file_uploader(
 )
 
 file_base_bo = st.sidebar.file_uploader(
-    "Base_BO",
+    "Base_BO (constructeur équipement)",
     type=["xlsx"]
 )
 
@@ -46,6 +46,7 @@ df_bo = pd.read_excel(file_base_bo)
 
 # ============================================================
 # NORMALISATION – EXTRACTION IE
+# (OR Field déjà filtrés en amont via Power Query)
 # ============================================================
 df_ie["OR"] = df_ie["OR"].astype(str).str.strip()
 
@@ -57,14 +58,7 @@ df_ie["Planifié ?"] = (
     .str.upper()
 )
 
-df_ie["Est_Planifie"] = df_ie["Planifié ?"].str.startswith("PLANIFI")
-
-df_ie["Localisation"] = (
-    df_ie["Localisation"]
-    .astype(str)
-    .str.upper()
-    .str.strip()
-)
+df_ie["Est_Planifie"] = df_ie["Planifié ?"].eq("PLANIFIÉ")
 
 df_ie["Position"] = (
     df_ie["Position"]
@@ -74,89 +68,8 @@ df_ie["Position"] = (
 )
 
 # ============================================================
-
-
+# FILTRE POSITION (PÉRIMÈTRE MÉTIER)
 # ============================================================
-# NORMALISATION – POINTAGE
-# Règle : 1 OR = 1 technicien (premier trouvé)
-# ============================================================
-df_pt["OR"] = (
-    df_pt["OR (Numéro)"]
-    .astype(str)
-    .str.strip()
-)
-
-df_pt_clean = (
-    df_pt[
-        ["OR", "Salarié - Nom", "Salarié - Equipe(Nom)"]
-    ]
-    .dropna(subset=["OR"])
-    .drop_duplicates(subset=["OR"])
-    .rename(columns={
-        "Salarié - Nom": "Technicien",
-        "Salarié - Equipe(Nom)": "Equipe"
-    })
-)
-
-# ============================================================
-# MERGE IE + POINTAGE
-# ============================================================
-df = df_ie.merge(
-    df_pt_clean,
-    on="OR",
-    how="left"
-)
-
-# ============================================================
-# NORMALISATION – BASE BO
-# ============================================================
-df_bo["OR"] = (
-    df_bo["N° OR (Segment)"]
-    .astype(str)
-    .str.strip()
-)
-
-df_bo["Constructeur"] = (
-    df_bo["Constructeur de l'équipement"]
-    .astype(str)
-    .str.upper()
-    .str.strip()
-)
-
-df_bo_clean = df_bo[["OR", "Constructeur"]].dropna(subset=["OR"])
-
-# ============================================================
-# MERGE CONSTRUCTEUR
-# ============================================================
-df = df.merge(
-    df_bo_clean,
-    on="OR",
-    how="left"
-)
-
-# ============================================================
-# FILTRE CONSTRUCTEUR
-# ============================================================
-st.sidebar.header("🏗️ Équipement")
-
-constructeurs_disponibles = sorted(
-    df["Constructeur"]
-    .dropna()
-    .unique()
-    .tolist()
-)
-
-constructeurs_selectionnes = st.sidebar.multiselect(
-    "Constructeur de l’équipement",
-    options=constructeurs_disponibles,
-    default=constructeurs_disponibles
-)
-
-if constructeurs_selectionnes:
-    df = df[df["Constructeur"].isin(constructeurs_selectionnes)]
-
-# ============================================================
-# Filte sur La position
 st.sidebar.header("🎛️ Périmètre métier")
 
 positions_disponibles = sorted(
@@ -173,8 +86,81 @@ df_ie = df_ie[
     df_ie["Position"].isin(positions_selectionnees)
 ].copy()
 
-#=============================================================
-# KPI
+# ============================================================
+# POINTAGE – RAMENER AU GRAIN OR (1 OR = 1 TECHNICIEN)
+# Règle : premier technicien pointé (stable)
+# ============================================================
+df_pt_or = (
+    df_pt
+    .assign(
+        OR=lambda x: x["OR (Numéro)"].astype(str).str.strip()
+    )
+    .groupby("OR", as_index=False)
+    .agg({
+        "Salarié - Nom": "first",
+        "Salarié - Equipe(Nom)": "first"
+    })
+    .rename(columns={
+        "Salarié - Nom": "Technicien",
+        "Salarié - Equipe(Nom)": "Equipe"
+    })
+)
+
+# ============================================================
+# BASE_BO – RAMENER AU GRAIN OR (1 OR = 1 CONSTRUCTEUR)
+# ============================================================
+df_bo_or = (
+    df_bo
+    .assign(
+        OR=lambda x: x["N° OR (Segment)"].astype(str).str.strip(),
+        Constructeur=lambda x: x["Constructeur de l'équipement"]
+            .astype(str)
+            .str.upper()
+            .str.strip()
+    )
+    .groupby("OR", as_index=False)
+    .agg({
+        "Constructeur": "first"
+    })
+)
+
+# ============================================================
+# MERGES FINAUX (SANS DUPLICATION)
+# TABLE MAÎTRE = EXTRACTION IE
+# ============================================================
+df = (
+    df_ie
+    .merge(df_pt_or, on="OR", how="left")
+    .merge(df_bo_or, on="OR", how="left")
+)
+
+# ============================================================
+# VERROU DE SÉCURITÉ (CRITIQUE)
+# ============================================================
+assert df["OR"].nunique() == len(df), (
+    "❌ ERREUR CRITIQUE : duplication d’OR après merge"
+)
+
+# ============================================================
+# FILTRE CONSTRUCTEUR
+# ============================================================
+st.sidebar.header("🏗️ Équipement")
+
+constructeurs_disponibles = sorted(
+    df["Constructeur"].dropna().unique().tolist()
+)
+
+constructeurs_selectionnes = st.sidebar.multiselect(
+    "Constructeur de l’équipement",
+    options=constructeurs_disponibles,
+    default=constructeurs_disponibles
+)
+
+if constructeurs_selectionnes:
+    df = df[df["Constructeur"].isin(constructeurs_selectionnes)]
+
+# ============================================================
+# KPI (GRAIN = OR)
 # ============================================================
 total_or = df["OR"].nunique()
 or_planifies = df[df["Est_Planifie"]]["OR"].nunique()
@@ -189,7 +175,7 @@ c2.metric("Total OR planifiés", or_planifies)
 c3.metric("Taux de planification", f"{taux_planif} %")
 
 # ============================================================
-# GRAPHIQUE – PAR ÉQUIPE
+# GRAPHIQUE – OR PAR ÉQUIPE
 # ============================================================
 df_graph = (
     df.groupby(["Equipe", "Planifié ?"])["OR"]
@@ -203,14 +189,14 @@ fig = px.bar(
     y="OR",
     color="Planifié ?",
     barmode="stack",
-    title="OR Field – Planifiés vs Non planifiés par équipe",
-    text_auto=True
+    text_auto=True,
+    title="OR Field – Planifiés vs Non planifiés par équipe"
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================
-# TABLE DÉTAILLÉE
+# TABLEAU DÉTAIL – 1 OR = 1 LIGNE
 # ============================================================
 st.subheader("📋 Détail des OR Field retenus dans les KPI")
 
@@ -220,23 +206,21 @@ st.dataframe(
             "OR",
             "Nom client",
             "Type intervention",
-            "Localisation",
             "Position",
             "Constructeur",
             "Technicien",
             "Equipe",
             "Planifié ?"
         ]
-    ].sort_values("OR"),
+    ]
+    .sort_values("OR"),
     use_container_width=True
 )
 
 # ============================================================
-# MESSAGE CONTEXTE MÉTIER
+# INFO MÉTIER
 # ============================================================
-if positions_selectionnees == ["EC"]:
-    st.warning(
-        "⚠️ Le filtre Position = EC (En cours) "
-        "contient majoritairement des OR non planifiés. "
-        "Le taux affiché n’est pas représentatif du KPI final."
-    )
+st.caption(
+    "ℹ️ Les KPI sont calculés sur les OR distincts. "
+    "Chaque OR apparaît une seule fois (grain maîtrisé)."
+)
