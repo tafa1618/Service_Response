@@ -45,8 +45,7 @@ df_pt = pd.read_excel(file_pointage)
 df_bo = pd.read_excel(file_base_bo)
 
 # ============================================================
-# NORMALISATION – EXTRACTION IE
-# (OR Field déjà filtrés en amont via Power Query)
+# NORMALISATION – EXTRACTION IE (TABLE KPI)
 # ============================================================
 df_ie["OR"] = df_ie["OR"].astype(str).str.strip()
 
@@ -68,9 +67,9 @@ df_ie["Position"] = (
 )
 
 # ============================================================
-# FILTRE POSITION (PÉRIMÈTRE MÉTIER)
+# FILTRE POSITION (IMPACTE LE KPI)
 # ============================================================
-st.sidebar.header("🎛️ Périmètre métier")
+st.sidebar.header("🎛️ Périmètre KPI")
 
 positions_disponibles = sorted(
     df_ie["Position"].dropna().unique().tolist()
@@ -82,13 +81,27 @@ positions_selectionnees = st.sidebar.multiselect(
     default=positions_disponibles
 )
 
-df_ie = df_ie[
+df_kpi = df_ie[
     df_ie["Position"].isin(positions_selectionnees)
 ].copy()
 
 # ============================================================
-# POINTAGE – RAMENER AU GRAIN OR (1 OR = 1 TECHNICIEN)
-# Règle : premier technicien pointé (stable)
+# KPI – CALCULÉS AVANT MERGES
+# ============================================================
+total_or = df_kpi["OR"].nunique()
+or_planifies = df_kpi[df_kpi["Est_Planifie"]]["OR"].nunique()
+or_non_planifies = total_or - or_planifies
+taux_planif = round(
+    (or_planifies / total_or) * 100, 2
+) if total_or > 0 else 0
+
+c1, c2, c3 = st.columns(3)
+c1.metric("Total OR non planifiés", or_non_planifies)
+c2.metric("Total OR planifiés", or_planifies)
+c3.metric("Taux de planification", f"{taux_planif} %")
+
+# ============================================================
+# POINTAGE – 1 OR = 1 TECHNICIEN (APRÈS KPI)
 # ============================================================
 df_pt_or = (
     df_pt
@@ -107,7 +120,7 @@ df_pt_or = (
 )
 
 # ============================================================
-# BASE_BO – RAMENER AU GRAIN OR (1 OR = 1 CONSTRUCTEUR)
+# BASE_BO – 1 OR = 1 CONSTRUCTEUR (APRÈS KPI)
 # ============================================================
 df_bo_or = (
     df_bo
@@ -125,29 +138,28 @@ df_bo_or = (
 )
 
 # ============================================================
-# MERGES FINAUX (SANS DUPLICATION)
-# TABLE MAÎTRE = EXTRACTION IE
+# ENRICHISSEMENT POUR ANALYSE / ACTIONS
 # ============================================================
-df = (
-    df_ie
+df_actions = (
+    df_kpi
     .merge(df_pt_or, on="OR", how="left")
     .merge(df_bo_or, on="OR", how="left")
 )
 
 # ============================================================
-# VERROU DE SÉCURITÉ (CRITIQUE)
+# VERROU DE SÉCURITÉ
 # ============================================================
-assert df["OR"].nunique() == len(df), (
-    "❌ ERREUR CRITIQUE : duplication d’OR après merge"
+assert df_actions["OR"].nunique() == len(df_actions), (
+    "❌ Erreur : duplication d’OR après enrichissement"
 )
 
 # ============================================================
-# FILTRE CONSTRUCTEUR
+# FILTRE CONSTRUCTEUR (ANALYSE SEULEMENT)
 # ============================================================
-st.sidebar.header("🏗️ Équipement")
+st.sidebar.header("🏗️ Analyse équipement")
 
 constructeurs_disponibles = sorted(
-    df["Constructeur"].dropna().unique().tolist()
+    df_actions["Constructeur"].dropna().unique().tolist()
 )
 
 constructeurs_selectionnes = st.sidebar.multiselect(
@@ -157,28 +169,16 @@ constructeurs_selectionnes = st.sidebar.multiselect(
 )
 
 if constructeurs_selectionnes:
-    df = df[df["Constructeur"].isin(constructeurs_selectionnes)]
-
-# ============================================================
-# KPI (GRAIN = OR)
-# ============================================================
-total_or = df["OR"].nunique()
-or_planifies = df[df["Est_Planifie"]]["OR"].nunique()
-or_non_planifies = total_or - or_planifies
-taux_planif = round(
-    (or_planifies / total_or) * 100, 2
-) if total_or > 0 else 0
-
-c1, c2, c3 = st.columns(3)
-c1.metric("Total OR non planifiés", or_non_planifies)
-c2.metric("Total OR planifiés", or_planifies)
-c3.metric("Taux de planification", f"{taux_planif} %")
+    df_actions = df_actions[
+        df_actions["Constructeur"].isin(constructeurs_selectionnes)
+    ]
 
 # ============================================================
 # GRAPHIQUE – OR PAR ÉQUIPE
 # ============================================================
 df_graph = (
-    df.groupby(["Equipe", "Planifié ?"])["OR"]
+    df_actions
+    .groupby(["Equipe", "Planifié ?"])["OR"]
     .nunique()
     .reset_index()
 )
@@ -196,12 +196,12 @@ fig = px.bar(
 st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================
-# TABLEAU DÉTAIL – 1 OR = 1 LIGNE
+# TABLEAU ACTIONS – 1 OR = 1 LIGNE
 # ============================================================
-st.subheader("📋 Détail des OR Field retenus dans les KPI")
+st.subheader("📋 Détail des OR Field (support actions)")
 
 st.dataframe(
-    df[
+    df_actions[
         [
             "OR",
             "Nom client",
@@ -221,6 +221,6 @@ st.dataframe(
 # INFO MÉTIER
 # ============================================================
 st.caption(
-    "ℹ️ Les KPI sont calculés sur les OR distincts. "
-    "Chaque OR apparaît une seule fois (grain maîtrisé)."
+    "ℹ️ Les KPI sont calculés exclusivement à partir de l’Extraction IE. "
+    "Les données Pointage et Base_BO servent uniquement à l’analyse et au pilotage des actions."
 )
