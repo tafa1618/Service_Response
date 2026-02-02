@@ -76,35 +76,33 @@ df_ie_field = df_ie_field[
 ].copy()
 
 # ============================================================
+# ============================================================
 # NORMALISATION – POINTAGE
 # ============================================================
 df_pt["OR"] = df_pt["OR (Numéro)"].astype(str).str.strip()
-df_pt["Heures"] = pd.to_numeric(
-    df_pt["Heures"],
-    errors="coerce"
-).fillna(0)
 
-# ============================================================
-# DÉTERMINER LE "VRAI" TECHNICIEN PAR OR
-# Règle : technicien avec le PLUS d’heures
-# ============================================================
-df_pt_agg = (
-    df_pt.groupby(
-        ["OR", "Salarié - Nom", "Salarié - Équipe(Nom)"],
-        as_index=False
-    )["Heures"]
-    .sum()
+# On garde uniquement les colonnes utiles
+df_pt_simple = (
+    df_pt[
+        [
+            "OR",
+            "Salarié - Nom",
+            "Salarié - Équipe(Nom)"
+        ]
+    ]
+    .dropna(subset=["OR"])
 )
 
+# 1 OR = 1 technicien (premier trouvé)
 df_pt_best = (
-    df_pt_agg
-    .sort_values(["OR", "Heures"], ascending=[True, False])
+    df_pt_simple
     .drop_duplicates(subset=["OR"])
     .rename(columns={
         "Salarié - Nom": "Technicien",
         "Salarié - Équipe(Nom)": "Equipe"
     })
 )
+
 
 # ============================================================
 # MERGE IE + POINTAGE
