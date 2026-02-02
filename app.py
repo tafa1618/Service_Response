@@ -10,7 +10,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🔍 Validation KPI Service Response (hors Power BI)")
+st.title("🔍 Validation KPI Service Response ")
 st.caption("Objectif : vérifier la logique métier et les chiffres réels")
 
 # ============================================================
